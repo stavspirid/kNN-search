@@ -8,7 +8,7 @@ typedef struct {
 
 void createSet(double *set, int setSize, int dim);
 
-void calcSquare(double *set, int setSize, int dim, double *squared);
+void calcSquare(double *set, int setSize, int dim, double *squared)
 
 void calcDistances(double *C, double *qBlock, double *cSquared, double *D, int cSize, int qBlockSize, int dim);
 

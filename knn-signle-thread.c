@@ -2,46 +2,15 @@
 #include <stdio.h>
 #include <math.h>
 #include <cblas.h>
-#include "knn.h"
+#include <unistd.h>
+// #include "knn.h"
 
-#define RAND_MAX 1024
+// #define RAND_MAX 1024
 
-// void swap(Neighbor *n, int a, int b) {
-//     Neighbor temp = n[a];
-//     n[a] = n[b];
-//     n[b] = temp;
-// }   
-
-// int partition(Neighbor *set , int low, int high) {
-//     double pivot = set[high].distance;
-//     int i = low - 1;
-    
-//     for (int j = low; j < high; j++) {
-//         if (set[j].distance  < pivot) {
-//             i++;
-//             swap(set, i, j);
-//         }
-//     }
-    
-//     swap(set, i+1, high);
-//     return i + 1;
-// }
-
-
-// int quickSelect(Neighbor* set, int low, int high, int neighbors) {
-//     if (low < high) {
-//         int pivot = partition(set, low, high);
-        
-//         if (pivot == neighbors) {
-//             return set[pivot];
-//         } else if (pivot > neighbors) {
-//             return quickSelect(set, low, pivot - 1, neighbors);
-//         } else {
-//             return quickSelect(set, pivot + 1, high, neighbors);
-//         }
-//     }
-//     return -1;
-// }
+typedef struct {
+    double distance;
+    int index;
+} Neighbor;
 
 // ====================== Quickselect Implementation ======================
 void swap(Neighbor *a, Neighbor *b) {
@@ -83,9 +52,17 @@ void quickselect(Neighbor *set, int low, int high, int k) {
         }
     }
 }
+
+void blockQuickselect(Neighbor *blockDistances, int cSize, int curBlockSize, int neighbors) {
+    // For each query in the block, find its k nearest neighbors
+    for (int q = 0; q < curBlockSize; q++) {
+        Neighbor *queryDistances = &blockDistances[q * cSize];
+        quickselect(queryDistances, 0, cSize - 1, neighbors);
+    }
+}
 // ======================
 
-void createSet(double *set, int setSize, int dim) {
+double *createSet(int setSize, int dim) {
     return (double *)malloc(setSize * dim* sizeof(double));
 }
 
@@ -96,7 +73,10 @@ void fillRandomData(double *set, int setSize, int dim) {
 }
 
 void calcSquare(double *set, int setSize, int dim, double *squared) {
+    printf("Calculating squared values for set of size %d and dimension %d\n", setSize, dim);
+    sleep(1); // Sleep for 1 second to allow time for printing
     for (int i = 0; i < setSize; i++) {
+        squared[i] = 0.0;
         for (int j = 0; j < dim; j++) {
             squared[i] += set[i * dim + j] * set[i * dim + j];
         }
@@ -108,9 +88,12 @@ void calcDistances(double *C, double *qBlock, double *cSquared, double *D,
     
     // Step 1: Compute 2CQ^T using OpenBLAS (cSize x qBlockSize)
     double *cqBlock = (double *)malloc(cSize * qBlockSize * sizeof(double));
-    cblas_dgemm(CblasColMajor, CblasNoTrans, CblasTrans,
-                cSize, qBlockSize, dim, 2.0, C, cSize, qBlock, qBlockSize, 0.0, cqBlock, cSize);
-    
+    // cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
+    //             cSize, qBlockSize, dim, 2.0, C, cSize, qBlock, qBlockSize, 0.0, cqBlock, cSize);
+    cblas_dgemm(CblasRowMajor, CblasNoTrans, CblasTrans,
+                cSize, qBlockSize, dim, 2.0, C, dim, qBlock, dim, 0.0, cqBlock, qBlockSize); // was cSize instead of qBlockSize before
+
+
     // Step 2: Compute Q^2 element-wise (qBlockSize x 1)
     double *qBlockSquared = (double *)malloc(qBlockSize * sizeof(double));
     calcSquare(qBlock, qBlockSize, dim, qBlockSquared);
@@ -128,11 +111,14 @@ void calcDistances(double *C, double *qBlock, double *cSquared, double *D,
 }
 
 void blockedKNNsearch(double *C, double *Q, int cSize, int qSize, int dim, int neighbors, int numberOfBlocks) {
+    printf("In blockedKNNsearch with cSize: %d, qSize: %d, dim: %d, neighbors: %d, numberOfBlocks: %d\n\n", cSize, qSize, dim, neighbors, numberOfBlocks);
+
+    sleep(2); 
     int blockSize = qSize / numberOfBlocks; // Size of each block
     int curBlockSize;  // Size of the current block
 
     // Compute C^2 element-wise (cSize x 1)
-    double *cSquared = (double *)malloc(cSize * sizeof(double));  
+    double *cSquared = createSet(cSize, 1);
     calcSquare(C, cSize, dim, cSquared);
 
     // Allocate memory for nearest neighbors and fill with initial values
@@ -143,55 +129,132 @@ void blockedKNNsearch(double *C, double *Q, int cSize, int qSize, int dim, int n
     }
 
     for (int block = 0; block < numberOfBlocks; block++) {
-        // Allocate Blocked Distances matrix
-        double *D = (double *)malloc(cSize * curBlockSize * sizeof(double));
-
         // Size of the current block
         if (block == numberOfBlocks - 1) {
-            curBlockSize = qSize - block * blockSize; // Last block may be smaller
+            curBlockSize = qSize - block * blockSize; // Last block may be larger
         } else {
             curBlockSize = blockSize;
         }
 
+        // Allocate Blocked Distances matrix
+        double *D = (double *)malloc(curBlockSize * cSize * sizeof(double));
+
         calcDistances(C, &Q[block * blockSize * dim], cSquared, 
-                      &D[block * blockSize * cSize], cSize, curBlockSize, dim);
+                      D, cSize, curBlockSize, dim);
         
         printf("Processing block %d/%d with %d query points\n", 
-               block + 1, numberOfBlocks, curBlockSize);
+                block + 1, numberOfBlocks, curBlockSize);
 
-        quickselect(D, 0, cSize * curBlockSize - 1, neighbors - 1);
+
+        // Convert the entire distance block to Neighbor format
+        // Layout: [Q0_C0, Q0_C1, ..., Q0_C(cSize-1), Q1_C0, Q1_C1, ..., Q1_C(cSize-1), ...]
+        Neighbor *blockDistances = (Neighbor *)malloc(curBlockSize * cSize * sizeof(Neighbor));
+        
+        for (int q = 0; q < curBlockSize; q++) {
+            for (int c = 0; c < cSize; c++) {
+                blockDistances[q * cSize + c].distance = D[c * curBlockSize + q];
+                blockDistances[q * cSize + c].index = c; // Original index in C
+            }
+        }
+        
+        for (int q = 0; q < curBlockSize; q++) {
+            printf("Row %d: ", q);
+            for (int c = 0; c < cSize; c++) {
+                printf("C[%d]=%.3f ", blockDistances[q * cSize + c].index, 
+                       blockDistances[q * cSize + c].distance);
+            }
+            printf("\n");
+        }
+
+        // quickselect(blockDistances, 0, cSize * curBlockSize - 1, neighbors - 1);
+        blockQuickselect(blockDistances, cSize, curBlockSize, neighbors);
+
+        for (int q = 0; q < curBlockSize; q++) {
+            printf("Row %d: ", q);
+            for (int c = 0; c < cSize; c++) {
+                printf("C[%d]=%.3f ", blockDistances[q * cSize + c].index, 
+                       blockDistances[q * cSize + c].distance);
+            }
+            printf("\n");
+        }
+
+        for (int q = 0; q < curBlockSize; q++) {
+            for (int c = 0; c < neighbors; c++) {
+                int nearestIndex = blockDistances[q * cSize + c].index;
+                nearestNeighbors[q * neighbors + c].distance = blockDistances[q * cSize + c].distance;
+                nearestNeighbors[q * neighbors + c].index = nearestIndex;
+            }
+        }
+        for (int q = 0; q < curBlockSize; q++) {
+            printf("Query %d: ", q);
+            for (int c = 0; c < neighbors; c++) {
+                printf("C[%d]=%.3f ", nearestNeighbors[q * neighbors + c].index, 
+                       nearestNeighbors[q * neighbors + c].distance);
+            }
+            printf("\n");
+        }
 
         // Free allocated memory
+        free(blockDistances);
         free(D);
     }
 
     // Free allocated memory
     free(cSquared);
+    free(nearestNeighbors);
 }
 
 int main(void) {
     double *C, *Q, *D;
-    int cSize = 2000;
-    int qSize = 2000;
+    int cSize = 15;
+    int qSize = 22;
     int dim = 2;
     int neighbors = 3;
-    int numberOfBlocks = 10;
+    int numberOfBlocks = 4;
 
     // C: Known set
-    createSet(C, cSize, dim);
+    C = createSet(cSize, dim);
     // Q: Query set
-    createSet(Q, qSize, dim);
+    Q = createSet(qSize, dim);
     // D: Distances of nearest neighbors
-    createSet(D, cSize, dim);
+    D = createSet(cSize, dim);
     // nearestN: array of distances and indidces
     Neighbor *nearestN = (Neighbor *)malloc(qSize * neighbors * sizeof(Neighbor));
 
-    for (int i = 0; i < qSize; i++) {
-        printf("Query %d:\n", i);
-        for(int j = 0; j < neighbors; j++) {
-            printf("Number: %d  Distance: %d  Index: %d\n",j, nearestN[i * neighbors + j].distance, nearestN[i * neighbors + j].index);
+    fillRandomData(C, cSize, dim);
+    fillRandomData(Q, qSize, dim);
+
+    for (int i = 0; i < cSize; i++) {
+        printf("C[%d]: ", i);
+        for (int j = 0; j < dim; j++) {
+            printf("%f ", C[i * dim + j]);
         }
+        printf("\n");
     }
+    for (int i = 0; i < qSize; i++) {
+        printf("Q[%d]: ", i);
+        for (int j = 0; j < dim; j++) {
+            printf("%f ", Q[i * dim + j]);
+        }
+        printf("\n");
+    }
+
+    sleep(1); // Sleep for 1 second to allow time for printing
+
+    // for (int i = 0; i < qSize; i++) {
+    //     printf("Query %d:\n", i);
+    //     for(int j = 0; j < neighbors; j++) {
+    //         printf("Number: %d  Distance: %d  Index: %d\n",j, nearestN[i * neighbors + j].distance, nearestN[i * neighbors + j].index);
+    //     }
+    // }
+
+    blockedKNNsearch(C, Q, cSize, qSize, dim, neighbors, numberOfBlocks);
+
+    free(C);
+    free(Q);
+    free(D);
+    free(nearestN);
+    printf("Finished KNN search.\n");
     
     return 0;
 }
