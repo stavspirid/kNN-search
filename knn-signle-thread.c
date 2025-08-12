@@ -3,7 +3,7 @@
 #include <math.h>
 #include <cblas.h>
 #include <unistd.h>
-// #include "knn.h"
+#include "knn.h"
 
 // #define RAND_MAX 1024
 
@@ -12,7 +12,6 @@ typedef struct {
     int index;
 } Neighbor;
 
-// ====================== Quickselect Implementation ======================
 void swap(Neighbor *a, Neighbor *b) {
     Neighbor temp = *a;
     *a = *b;
@@ -60,7 +59,6 @@ void blockQuickselect(Neighbor *blockDistances, int cSize, int curBlockSize, int
         quickselect(queryDistances, 0, cSize - 1, neighbors);
     }
 }
-// ======================
 
 double *createSet(int setSize, int dim) {
     return (double *)malloc(setSize * dim* sizeof(double));
@@ -157,26 +155,25 @@ void blockedKNNsearch(double *C, double *Q, int cSize, int qSize, int dim, int n
             }
         }
         
-        for (int q = 0; q < curBlockSize; q++) {
-            printf("Row %d: ", q);
-            for (int c = 0; c < cSize; c++) {
-                printf("C[%d]=%.3f ", blockDistances[q * cSize + c].index, 
-                       blockDistances[q * cSize + c].distance);
-            }
-            printf("\n");
-        }
+        // for (int q = 0; q < curBlockSize; q++) {
+        //     printf("Row %d: ", q);
+        //     for (int c = 0; c < cSize; c++) {
+        //         printf("C[%d]=%.3f ", blockDistances[q * cSize + c].index, 
+        //                blockDistances[q * cSize + c].distance);
+        //     }
+        //     printf("\n");
+        // }
 
-        // quickselect(blockDistances, 0, cSize * curBlockSize - 1, neighbors - 1);
         blockQuickselect(blockDistances, cSize, curBlockSize, neighbors);
 
-        for (int q = 0; q < curBlockSize; q++) {
-            printf("Row %d: ", q);
-            for (int c = 0; c < cSize; c++) {
-                printf("C[%d]=%.3f ", blockDistances[q * cSize + c].index, 
-                       blockDistances[q * cSize + c].distance);
-            }
-            printf("\n");
-        }
+        // for (int q = 0; q < curBlockSize; q++) {
+        //     printf("Row %d: ", q);
+        //     for (int c = 0; c < cSize; c++) {
+        //         printf("C[%d]=%.3f ", blockDistances[q * cSize + c].index, 
+        //                blockDistances[q * cSize + c].distance);
+        //     }
+        //     printf("\n");
+        // }
 
         for (int q = 0; q < curBlockSize; q++) {
             for (int c = 0; c < neighbors; c++) {
@@ -206,11 +203,11 @@ void blockedKNNsearch(double *C, double *Q, int cSize, int qSize, int dim, int n
 
 int main(void) {
     double *C, *Q, *D;
-    int cSize = 15;
-    int qSize = 22;
-    int dim = 2;
+    int cSize = 5000;
+    int qSize = 5000;
+    int dim = 14;
     int neighbors = 3;
-    int numberOfBlocks = 4;
+    int numberOfBlocks = 300;
 
     // C: Known set
     C = createSet(cSize, dim);
@@ -224,29 +221,24 @@ int main(void) {
     fillRandomData(C, cSize, dim);
     fillRandomData(Q, qSize, dim);
 
-    for (int i = 0; i < cSize; i++) {
-        printf("C[%d]: ", i);
-        for (int j = 0; j < dim; j++) {
-            printf("%f ", C[i * dim + j]);
-        }
-        printf("\n");
-    }
-    for (int i = 0; i < qSize; i++) {
-        printf("Q[%d]: ", i);
-        for (int j = 0; j < dim; j++) {
-            printf("%f ", Q[i * dim + j]);
-        }
-        printf("\n");
-    }
+    // for (int i = 0; i < cSize; i++) {
+    //     printf("C[%d]: ", i);
+    //     for (int j = 0; j < dim; j++) {
+    //         printf("%f ", C[i * dim + j]);
+    //     }
+    //     printf("\n");
+    // }
+    // for (int i = 0; i < qSize; i++) {
+    //     printf("Q[%d]: ", i);
+    //     for (int j = 0; j < dim; j++) {
+    //         printf("%f ", Q[i * dim + j]);
+    //     }
+    //     printf("\n");
+    // }
 
     sleep(1); // Sleep for 1 second to allow time for printing
 
-    // for (int i = 0; i < qSize; i++) {
-    //     printf("Query %d:\n", i);
-    //     for(int j = 0; j < neighbors; j++) {
-    //         printf("Number: %d  Distance: %d  Index: %d\n",j, nearestN[i * neighbors + j].distance, nearestN[i * neighbors + j].index);
-    //     }
-    // }
+
 
     blockedKNNsearch(C, Q, cSize, qSize, dim, neighbors, numberOfBlocks);
 
